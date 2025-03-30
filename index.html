@@ -1,0 +1,894 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Piano Sensores Pro</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Estilos personalizados */
+        #sensor-ball {
+            width: 40px; /* Tamaño base más pequeño */
+            height: 40px;
+            background-color: #3B82F6;
+            border-radius: 50%;
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%) scale(1); /* Escala inicial */
+            transition: background-color 0.3s ease, transform 0.1s ease;
+            will-change: transform, background-color;
+            z-index: 10;
+        }
+        .dark #sensor-ball { background-color: #60A5FA; }
+
+        #visualizer-mode-btn, #help-btn, #sustain-btn {
+            position: fixed; z-index: 100;
+        }
+        #visualizer-mode-btn { bottom: 20px; right: 20px; }
+        #help-btn { bottom: 70px; right: 20px; }
+        #sustain-btn { bottom: 120px; right: 20px; display: none; /* Mostrar solo en modo piano */ }
+        #sustain-btn.active { background-color: #FBBF24 !important; color: #78350F !important; }
+
+        .fullscreen-mode { /* ... (sin cambios) ... */ }
+        .fullscreen-mode #app { display: none; }
+        .fullscreen-mode #sensor-ball { /* ... (sin cambios) ... */ }
+        .fullscreen-mode #visualizer-mode-btn { /* ... (sin cambios) ... */ }
+        .fullscreen-mode #help-btn, .fullscreen-mode #sustain-btn { display: none; }
+
+        .selected-scale, .selected-root, .selected-wave { /* ... (similar a selected-scale) ... */
+            background-color: #BFDBFE !important; color: #1E40AF; font-weight: 600; border: 1px solid #93C5FD;
+        }
+        .dark .selected-scale, .dark .selected-root, .dark .selected-wave {
+             background-color: #1E40AF !important; color: #BFDBFE; border: 1px solid #3B82F6;
+        }
+
+        /* Estilos para el visualizador simple */
+        #volume-visualizer-bar {
+            width: 0%; height: 100%; background-color: #34D399; border-radius: 0.25rem;
+             transition: width 0.05s linear;
+        }
+        .dark #volume-visualizer-bar { background-color: #6EE7B7; }
+
+        /* Modal de Ayuda */
+        #help-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 200; }
+        #help-modal.active { display: flex; align-items: center; justify-content: center; }
+        #help-modal > div { max-width: 90%; width: 500px; }
+
+        /* Input range styles */
+        input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 8px; background: #d1d5db; border-radius: 5px; outline: none; opacity: 0.7; transition: opacity .2s; }
+        input[type=range]:hover { opacity: 1; }
+        input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 20px; height: 20px; background: #3b82f6; border-radius: 50%; cursor: pointer; }
+        input[type=range]::-moz-range-thumb { width: 20px; height: 20px; background: #3b82f6; border-radius: 50%; cursor: pointer; border: none; }
+        .dark input[type=range] { background: #4b5563; }
+        .dark input[type=range]::-webkit-slider-thumb { background: #60a5fa; }
+        .dark input[type=range]::-moz-range-thumb { background: #60a5fa; }
+
+
+        body { scrollbar-width: none; -ms-overflow-style: none; }
+        body::-webkit-scrollbar { width: 0; height: 0; }
+    </style>
+    <script>
+        if (localStorage.theme === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+          document.documentElement.classList.add('dark')
+        } else {
+          document.documentElement.classList.remove('dark')
+        }
+    </script>
+</head>
+<body class="bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100 min-h-screen font-sans transition-colors duration-300">
+    <div id="app" class="container mx-auto px-4 py-8">
+        <header class="mb-8 text-center">
+            <h1 class="text-3xl sm:text-4xl font-bold mb-2 text-blue-700 dark:text-blue-400">Piano Sensores Pro</h1>
+            <p class="text-lg text-gray-700 dark:text-gray-300">Control avanzado de sonido con sensores.</p>
+            <p class="text-xs mt-4 text-gray-500 dark:text-gray-500">Creado por Manuel Puebla Vega</p>
+        </header>
+
+        <div id="status-message" class="max-w-3xl mx-auto text-center mb-4 p-3 rounded-lg text-sm"></div>
+
+        <div id="controls" class="max-w-3xl mx-auto bg-white dark:bg-gray-800 rounded-xl shadow-lg p-4 sm:p-6 mb-8 transition-colors duration-300">
+
+            <!-- Estado y Controles Principales -->
+            <fieldset class="mb-6 border border-gray-300 dark:border-gray-600 rounded-lg p-4">
+                <legend class="text-sm font-medium px-2 text-gray-600 dark:text-gray-400">Estado y Control</legend>
+                <div class="grid grid-cols-2 gap-4 mb-4">
+                    <div class="text-center">
+                        <h3 class="font-medium text-xs sm:text-sm text-gray-600 dark:text-gray-400">Nota / Freq.</h3>
+                        <div id="frequency-display" class="text-lg sm:text-2xl font-semibold text-blue-700 dark:text-blue-400">-</div>
+                    </div>
+                    <div class="text-center">
+                        <h3 class="font-medium text-xs sm:text-sm text-gray-600 dark:text-gray-400">Volumen</h3>
+                        <div id="volume-display" class="text-lg sm:text-2xl font-semibold text-blue-700 dark:text-blue-400">0%</div>
+                    </div>
+                </div>
+                <!-- Visualizador simple de volumen -->
+                <div class="h-3 bg-gray-200 dark:bg-gray-700 rounded mb-4 overflow-hidden">
+                    <div id="volume-visualizer-bar"></div>
+                </div>
+                <div class="flex justify-center items-center space-x-2 sm:space-x-4">
+                    <button id="start-btn" class="px-4 py-2 sm:px-5 sm:py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm sm:text-base font-semibold transition duration-200 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed">
+                        ▶ Iniciar
+                    </button>
+                    <button id="stop-btn" class="px-4 py-2 sm:px-5 sm:py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm sm:text-base font-semibold transition duration-200 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                        ■ Detener
+                    </button>
+                    <button id="calibrate-btn" title="Calibrar Sensores (Define 'centro' actual)" class="p-2 bg-yellow-500 hover:bg-yellow-600 text-white rounded-full text-sm sm:text-base transition duration-200 ease-in-out disabled:opacity-50" disabled>
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 sm:h-5 sm:w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                    </button>
+                </div>
+            </fieldset>
+
+            <!-- Modo de Sonido y Opciones -->
+            <fieldset class="mb-6 border border-gray-300 dark:border-gray-600 rounded-lg p-4">
+                <legend class="text-sm font-medium px-2 text-gray-600 dark:text-gray-400">Modo Sonido</legend>
+                <div class="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-4 mb-4">
+                    <button data-mode="wave" class="sound-mode-btn text-sm px-4 py-2 rounded-lg flex-1 transition duration-200 ease-in-out">Onda</button>
+                    <button data-mode="piano" class="sound-mode-btn text-sm px-4 py-2 rounded-lg flex-1 transition duration-200 ease-in-out">Piano</button>
+                </div>
+                <!-- Opciones Modo Onda -->
+                <div id="wave-options" class="mb-4 hidden">
+                    <label class="block text-xs font-medium mb-1">Tipo de Onda:</label>
+                    <div class="grid grid-cols-4 gap-1">
+                        <button data-wave="sine" class="wave-type-btn text-xs px-2 py-1 bg-gray-200 dark:bg-gray-700 rounded">Sine</button>
+                        <button data-wave="square" class="wave-type-btn text-xs px-2 py-1 bg-gray-200 dark:bg-gray-700 rounded">Square</button>
+                        <button data-wave="sawtooth" class="wave-type-btn text-xs px-2 py-1 bg-gray-200 dark:bg-gray-700 rounded">Saw</button>
+                        <button data-wave="triangle" class="wave-type-btn text-xs px-2 py-1 bg-gray-200 dark:bg-gray-700 rounded">Tri</button>
+                    </div>
+                </div>
+                 <!-- Opciones Modo Piano -->
+                 <div id="piano-options" class="hidden space-y-3">
+                     <div>
+                        <label class="block text-xs font-medium mb-1">Nota Raíz (Tónica):</label>
+                        <div class="grid grid-cols-6 gap-1">
+                            <button data-root="0" class="root-note-btn text-xs px-1 py-1 bg-gray-200 dark:bg-gray-700 rounded">C</button>
+                            <button data-root="2" class="root-note-btn text-xs px-1 py-1 bg-gray-200 dark:bg-gray-700 rounded">D</button>
+                            <button data-root="4" class="root-note-btn text-xs px-1 py-1 bg-gray-200 dark:bg-gray-700 rounded">E</button>
+                            <button data-root="5" class="root-note-btn text-xs px-1 py-1 bg-gray-200 dark:bg-gray-700 rounded">F</button>
+                            <button data-root="7" class="root-note-btn text-xs px-1 py-1 bg-gray-200 dark:bg-gray-700 rounded">G</button>
+                            <button data-root="9" class="root-note-btn text-xs px-1 py-1 bg-gray-200 dark:bg-gray-700 rounded">A</button>
+                            <button data-root="11" class="root-note-btn text-xs px-1 py-1 bg-gray-200 dark:bg-gray-700 rounded">B</button>
+                            <!-- Podríamos añadir sostenidos/bemoles si es necesario -->
+                        </div>
+                     </div>
+                    <div>
+                        <label class="block text-xs font-medium mb-1">Escala Musical:</label>
+                        <div id="scale-options-grid" class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                           <!-- Botones de escala generados por JS -->
+                        </div>
+                    </div>
+                </div>
+            </fieldset>
+
+             <!-- Efectos y Controles Avanzados -->
+            <fieldset class="mb-6 border border-gray-300 dark:border-gray-600 rounded-lg p-4">
+                <legend class="text-sm font-medium px-2 text-gray-600 dark:text-gray-400">Ajustes y Efectos</legend>
+                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                     <!-- Controles de Sensibilidad -->
+                     <div class="space-y-2">
+                         <div>
+                             <label for="volume-sensitivity" class="block text-xs font-medium">Sensibilidad Volumen (Beta): <span id="volume-sensitivity-value">1.5</span></label>
+                             <input type="range" id="volume-sensitivity" min="0.5" max="3" step="0.1" value="1.5" class="w-full h-2">
+                         </div>
+                         <div>
+                             <label for="note-range" class="block text-xs font-medium">Rango Notas (Gamma - Grados): <span id="note-range-value">120</span>°</label>
+                             <input type="range" id="note-range" min="60" max="160" step="10" value="120" class="w-full h-2">
+                         </div>
+                     </div>
+                     <!-- Controles de Efectos -->
+                     <div class="space-y-2">
+                         <div class="flex items-center justify-between">
+                            <label for="filter-toggle" class="text-xs font-medium">Filtro (Alpha):</label>
+                            <button id="filter-toggle" class="px-2 py-1 text-xs rounded bg-gray-300 dark:bg-gray-600">OFF</button>
+                         </div>
+                         <div class="flex items-center justify-between">
+                            <label for="delay-toggle" class="text-xs font-medium">Eco (Delay):</label>
+                            <button id="delay-toggle" class="px-2 py-1 text-xs rounded bg-gray-300 dark:bg-gray-600">OFF</button>
+                         </div>
+                     </div>
+                 </div>
+            </fieldset>
+
+             <!-- Visualización del sensor -->
+             <div class="relative bg-gray-200 dark:bg-gray-600 rounded-lg p-2 overflow-hidden shadow-inner" style="height: 180px;">
+                 <div class="absolute inset-0 flex justify-center items-center">
+                     <span class="text-xs text-gray-500 dark:text-gray-400">Área de Sensores</span>
+                 </div>
+                 <div id="sensor-ball-container" class="absolute inset-0">
+                    <div id="sensor-ball"></div>
+                 </div>
+             </div>
+        </div>
+    </div>
+
+    <!-- Botones Flotantes -->
+    <button id="sustain-btn" title="Sustain Pedal (Modo Piano)" class="p-3 bg-gray-500 hover:bg-gray-600 text-white rounded-full shadow-lg">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V7z" clip-rule="evenodd" /></svg>
+    </button>
+    <button id="help-btn" title="Ayuda" class="p-3 bg-blue-600 hover:bg-blue-700 text-white rounded-full shadow-lg">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.79 4 4s-1.79 4-4 4c-1.742 0-3.223-.835-3.772-2M9 12H3v3h6v-3zM15 12h6v3h-6v-3z" /></svg>
+    </button>
+    <button id="visualizer-mode-btn" class="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg shadow-lg text-sm">
+        Visualización
+    </button>
+
+    <!-- Modal de Ayuda -->
+    <div id="help-modal" class="p-4">
+        <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl max-h-[80vh] overflow-y-auto">
+            <h2 class="text-xl font-semibold mb-4">Guía Rápida - Piano Sensores Pro</h2>
+            <ul class="list-disc list-inside space-y-2 text-sm mb-4">
+                <li><strong>Iniciar/Detener:</strong> Usa los botones ▶ y ■.</li>
+                <li><strong>Permisos:</strong> Permite el acceso a sensores de movimiento cuando se solicite.</li>
+                <li><strong>Volumen (Eje Beta):</strong> Inclina el móvil hacia <strong class="font-semibold">adelante/atrás</strong>.</li>
+                <li><strong>Nota/Frecuencia (Eje Gamma):</strong> Inclina el móvil hacia <strong class="font-semibold">izquierda/derecha</strong>.</li>
+                <li><strong>Filtro (Eje Alpha):</strong> Activa el botón "Filtro" y <strong class="font-semibold">gira/rota</strong> el móvil sobre su eje Z (plano).</li>
+                <li><strong>Modo Piano:</strong> Selecciona Tónica y Escala. El rango de notas se controla con la inclinación lateral.</li>
+                <li><strong>Sustain (Piano):</strong> Mantén presionado el botón flotante (+) para sostener las notas.</li>
+                <li><strong>Modo Onda:</strong> Selecciona el tipo de onda (Sine, Square, Saw, Tri).</li>
+                <li><strong>Calibrar:</strong> Pulsa el botón ↻ para establecer la posición actual como el centro (Beta=0, Gamma=0).</li>
+                <li><strong>Ajustes:</strong> Modifica la sensibilidad de volumen y el rango de grados para las notas.</li>
+                <li><strong>Efectos:</strong> Activa/Desactiva Filtro y Eco (Delay).</li>
+                <li><strong>Visualización:</strong> Modo pantalla completa con la bola y (próximamente) más datos.</li>
+            </ul>
+            <button id="close-help-btn" class="mt-4 px-4 py-2 bg-blue-600 text-white rounded w-full">Cerrar</button>
+        </div>
+    </div>
+
+    <script>
+        // --- VARIABLES GLOBALES Y ESTADO ---
+        let audioContext;
+        let mainGainNode, filterNode, delayNode, feedbackGainNode, analyserNode;
+        let oscillator;
+        let activePianoNotes = {}; // Almacena múltiples notas de piano (para sustain)
+        let currentNoteMidi = null; // MIDI de la nota principal actual en modo piano
+        let orientationHandler = null;
+        let animationFrameId = null;
+
+        // Estado de la aplicación (con valores por defecto)
+        let appState = {
+            isPlaying: false,
+            isVisualizerMode: false,
+            permissionGranted: false,
+            soundMode: 'wave', // 'wave' o 'piano'
+            waveType: 'sine', // 'sine', 'square', 'sawtooth', 'triangle'
+            rootNote: 0, // Tónica (0=C, 1=C#, ...)
+            currentScale: 'chromatic',
+            volumeSensitivity: 1.5, // Exponente para curva de volumen
+            noteRangeDegrees: 120, // Grados para cubrir el rango de notas
+            filterEnabled: false,
+            delayEnabled: false,
+            sustainEnabled: false,
+            calibration: { beta: 0, gamma: 0, alpha: 0 } // Offsets de calibración
+        };
+
+        // --- CONSTANTES ---
+        const PIANO_SEMITONE_RANGE = 36;
+        const PIANO_CENTER_MIDI_NOTE = 60; // C4
+        const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+        const scales = { // Relativo a la tónica (0)
+            chromatic: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+            major: [0, 2, 4, 5, 7, 9, 11],            minor: [0, 2, 3, 5, 7, 8, 10],
+            pentatonic: [0, 2, 4, 7, 9],            minor_pentatonic: [0, 3, 5, 7, 10],
+            blues: [0, 3, 5, 6, 7, 10],            dorian: [0, 2, 3, 5, 7, 9, 10]
+        };
+        let validMidiNotesForScale = []; // Notas válidas calculadas
+
+        // --- ELEMENTOS DEL DOM ---
+        // (Obtener referencias a todos los botones, sliders, displays, etc.)
+        const startBtn = document.getElementById('start-btn');
+        const stopBtn = document.getElementById('stop-btn');
+        const calibrateBtn = document.getElementById('calibrate-btn');
+        const visualizerModeBtn = document.getElementById('visualizer-mode-btn');
+        const helpBtn = document.getElementById('help-btn');
+        const closeHelpBtn = document.getElementById('close-help-btn');
+        const sustainBtn = document.getElementById('sustain-btn');
+        const helpModal = document.getElementById('help-modal');
+        const frequencyDisplay = document.getElementById('frequency-display');
+        const volumeDisplay = document.getElementById('volume-display');
+        const volumeVisualizerBar = document.getElementById('volume-visualizer-bar');
+        const sensorBallContainer = document.getElementById('sensor-ball-container');
+        const sensorBall = document.getElementById('sensor-ball');
+        const statusMessage = document.getElementById('status-message');
+        const soundModeButtons = document.querySelectorAll('.sound-mode-btn');
+        const waveOptionsDiv = document.getElementById('wave-options');
+        const pianoOptionsDiv = document.getElementById('piano-options');
+        const waveTypeButtons = document.querySelectorAll('.wave-type-btn');
+        const rootNoteButtons = document.querySelectorAll('.root-note-btn');
+        const scaleOptionsGrid = document.getElementById('scale-options-grid');
+        const volumeSensitivitySlider = document.getElementById('volume-sensitivity');
+        const volumeSensitivityValue = document.getElementById('volume-sensitivity-value');
+        const noteRangeSlider = document.getElementById('note-range');
+        const noteRangeValue = document.getElementById('note-range-value');
+        const filterToggleBtn = document.getElementById('filter-toggle');
+        const delayToggleBtn = document.getElementById('delay-toggle');
+
+        // --- FUNCIONES DE AUDIO ---
+
+        function initAudioContext() {
+            if (audioContext) return true;
+            try {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                // Crear nodos principales
+                mainGainNode = audioContext.createGain();
+                filterNode = audioContext.createBiquadFilter();
+                delayNode = audioContext.createDelay(1.0); // Max 1 segundo delay
+                feedbackGainNode = audioContext.createGain();
+                analyserNode = audioContext.createAnalyser();
+
+                // Configuración inicial nodos
+                filterNode.type = 'lowpass';
+                filterNode.frequency.value = 20000; // Filtro abierto por defecto
+                feedbackGainNode.gain.value = 0.4; // Feedback del delay
+                analyserNode.fftSize = 256; // Tamaño pequeño para análisis de volumen
+                analyserNode.smoothingTimeConstant = 0.5;
+
+                // Conexiones: Source -> Filter -> Delay Line -> MainGain -> Analyser -> Destination
+                //           Delay -> Feedback -> Delay
+                filterNode.connect(delayNode);
+                delayNode.connect(mainGainNode);
+                mainGainNode.connect(analyserNode);
+                analyserNode.connect(audioContext.destination);
+
+                // Bucle de Feedback del Delay (solo si está activado)
+                delayNode.connect(feedbackGainNode);
+                feedbackGainNode.connect(delayNode);
+
+                mainGainNode.gain.value = 0; // Empezar silenciado
+                console.log("AudioContext y nodos inicializados.");
+                 if (audioContext.state === 'suspended') {
+                    audioContext.resume().then(() => console.log("AudioContext reanudado."));
+                }
+                return true;
+            } catch (e) {
+                console.error("Error al crear AudioContext:", e);
+                showStatusMessage("Error: No se pudo inicializar el audio.", "error");
+                return false;
+            }
+        }
+
+        async function startAudio() {
+            if (appState.isPlaying) return;
+            if (!initAudioContext()) return;
+            if (!appState.permissionGranted) {
+                showStatusMessage("Permite el acceso a los sensores primero.", "warning");
+                await requestSensorPermission();
+                if (!appState.permissionGranted) return;
+            }
+            if (audioContext.state === 'suspended') await audioContext.resume();
+            if (audioContext.state !== 'running') {
+                showStatusMessage("El contexto de audio no está activo.", "error"); return;
+            }
+
+            if (appState.soundMode === 'wave') {
+                if (!oscillator) {
+                    oscillator = audioContext.createOscillator();
+                    oscillator.type = appState.waveType;
+                    oscillator.connect(filterNode); // Conectar a filtro en lugar de mainGain
+                    oscillator.frequency.setValueAtTime(440, audioContext.currentTime); // Freq inicial
+                    oscillator.start();
+                    console.log("Oscilador iniciado.");
+                }
+            } else { // piano mode
+                currentNoteMidi = null; // Reiniciar nota activa
+                activePianoNotes = {}; // Limpiar notas sostenidas
+            }
+
+            appState.isPlaying = true;
+            mainGainNode.gain.setTargetAtTime(0.8, audioContext.currentTime, 0.05); // Subir volumen suavemente
+            showStatusMessage("Sonido Activado. Mueve tu dispositivo.", "success");
+            updateUI();
+            setupOrientationListener();
+            startAnimationLoop();
+            calibrateBtn.disabled = false; // Habilitar calibración
+        }
+
+        function stopAudio() {
+            if (!appState.isPlaying) return;
+
+            mainGainNode.gain.setTargetAtTime(0, audioContext.currentTime, 0.1); // Bajar volumen suavemente
+
+            if (oscillator) {
+                oscillator.stop(audioContext.currentTime + 0.1);
+                oscillator.disconnect();
+                oscillator = null;
+                console.log("Oscilador detenido.");
+            }
+            // Detener todas las notas de piano activas (incluyendo las sostenidas)
+            Object.values(activePianoNotes).forEach(note => note.stop(true)); // true = detener inmediatamente
+            activePianoNotes = {};
+            currentNoteMidi = null;
+
+            // Resetear displays y estado
+            frequencyDisplay.textContent = '-';
+            volumeDisplay.textContent = '0%';
+            volumeVisualizerBar.style.width = '0%';
+
+            appState.isPlaying = false;
+            showStatusMessage("Sonido Detenido.", "info");
+            updateUI();
+            stopAnimationLoop();
+            calibrateBtn.disabled = true;
+             // removeOrientationListener(); // No es estrictamente necesario aquí
+        }
+
+        // --- Piano Sound (modificado para sustain y múltiples notas) ---
+        function createPianoSound(midiNote, volume) {
+            if (!audioContext || audioContext.state !== 'running' || activePianoNotes[midiNote]) return null;
+
+            const now = audioContext.currentTime;
+            const attackTime = 0.01; const decayTime = 0.1;
+            const sustainLevel = 0.7; const releaseTime = 0.8;
+
+            const frequency = 440 * Math.pow(2, (midiNote - 69) / 12);
+            const noteGain = audioContext.createGain();
+            noteGain.connect(filterNode); // Conectar a filtro
+
+            // Envolvente ADSR
+            noteGain.gain.setValueAtTime(0, now);
+            noteGain.gain.linearRampToValueAtTime(volume, now + attackTime); // Attack
+            noteGain.gain.exponentialRampToValueAtTime(volume * sustainLevel, now + attackTime + decayTime); // Decay
+
+            const osc1 = audioContext.createOscillator(); osc1.type = 'triangle';
+            const osc2 = audioContext.createOscillator(); osc2.type = 'sine';
+            osc1.frequency.setValueAtTime(frequency, now);
+            osc2.frequency.setValueAtTime(frequency * 2, now);
+            osc1.connect(noteGain); osc2.connect(noteGain);
+            osc1.start(now); osc2.start(now);
+
+            let isStopping = false;
+
+            const stop = (forceImmediate = false) => {
+                 if (isStopping || !audioContext || audioContext.state !== 'running') return;
+
+                // Si sustain está activo y no forzamos, no detener aún
+                 if (appState.sustainEnabled && !forceImmediate) {
+                     console.log(`Sustain activo para MIDI ${midiNote}, no deteniendo.`);
+                     return;
+                 }
+
+                isStopping = true;
+                const stopTime = audioContext.currentTime;
+                noteGain.gain.cancelScheduledValues(stopTime);
+                noteGain.gain.setValueAtTime(noteGain.gain.value, stopTime);
+                noteGain.gain.exponentialRampToValueAtTime(0.0001, stopTime + releaseTime);
+
+                osc1.stop(stopTime + releaseTime + 0.1);
+                osc2.stop(stopTime + releaseTime + 0.1);
+                 setTimeout(() => {
+                     try {
+                        osc1.disconnect(); osc2.disconnect(); noteGain.disconnect();
+                     } catch(e){}
+                     delete activePianoNotes[midiNote]; // Eliminar de notas activas
+                     console.log(`Nota MIDI ${midiNote} detenida y eliminada.`);
+                 }, (releaseTime + 0.2) * 1000);
+            };
+
+            const noteInfo = { stop, midi: midiNote, gainNode: noteGain };
+            activePianoNotes[midiNote] = noteInfo; // Añadir a notas activas
+            console.log(`Nota MIDI ${midiNote} iniciada.`);
+            return noteInfo;
+        }
+
+        // --- MANEJO DE SENSORES Y CALIBRACIÓN ---
+
+        async function requestSensorPermission() { /* ... (sin cambios) ... */
+            if (typeof DeviceOrientationEvent === 'undefined' || typeof DeviceOrientationEvent.requestPermission !== 'function') {
+                 if ('DeviceOrientationEvent' in window) {
+                    appState.permissionGranted = true; showStatusMessage("Sensores listos.", "info"); return true;
+                 } else { showStatusMessage("Error: Sensores no compatibles.", "error"); return false; }
+            }
+            try {
+                const state = await DeviceOrientationEvent.requestPermission();
+                appState.permissionGranted = (state === 'granted');
+                showStatusMessage(appState.permissionGranted ? "Permiso concedido." : "Permiso denegado.", appState.permissionGranted ? "success" : "warning");
+                return appState.permissionGranted;
+            } catch (error) { showStatusMessage("Error al pedir permiso.", "error"); return false; }
+        }
+
+        function setupOrientationListener() {
+            if (!appState.permissionGranted) return;
+            if (!orientationHandler && window.DeviceOrientationEvent) {
+                let lastEventData = {beta: null, gamma: null, alpha: null};
+                orientationHandler = (event) => {
+                    // Simple debouncing: process only if values changed significantly or time passed
+                    // (Could be improved, but basic check)
+                    // if (Math.abs(event.beta - lastEventData.beta) > 0.1 || Math.abs(event.gamma - lastEventData.gamma) > 0.1 || Math.abs(event.alpha - lastEventData.alpha) > 1) {
+                        handleOrientation(event);
+                    //     lastEventData = {beta: event.beta, gamma: event.gamma, alpha: event.alpha};
+                    // }
+                };
+                window.addEventListener('deviceorientation', orientationHandler);
+            }
+        }
+
+        function removeOrientationListener() { /* ... (sin cambios) ... */ }
+
+        function calibrateSensors() {
+            if (!lastOrientationEvent) {
+                showStatusMessage("Mueve el dispositivo para obtener datos del sensor.", "warning");
+                return;
+            }
+            appState.calibration.beta = lastOrientationEvent.beta || 0;
+            appState.calibration.gamma = lastOrientationEvent.gamma || 0;
+            appState.calibration.alpha = lastOrientationEvent.alpha || 0;
+            saveSettings(); // Guardar calibración
+            showStatusMessage(`Sensores calibrados a Beta:${appState.calibration.beta.toFixed(1)} Gamma:${appState.calibration.gamma.toFixed(1)} Alpha:${appState.calibration.alpha.toFixed(1)}`, "success");
+        }
+
+        let lastOrientationEvent = null; // Guardar último evento para calibración
+
+        function handleOrientation(event) {
+            lastOrientationEvent = event; // Guardar para calibración
+            const rawBeta = event.beta; const rawGamma = event.gamma; const rawAlpha = event.alpha;
+            if (rawBeta === null || rawGamma === null) return;
+
+            // Aplicar calibración
+            const beta = rawBeta - appState.calibration.beta;
+            const gamma = rawGamma - appState.calibration.gamma;
+            // Alpha necesita manejo especial por el wrap 0-360
+            let alpha = 0;
+            if (rawAlpha !== null) {
+                 alpha = rawAlpha - appState.calibration.alpha;
+                 // Normalizar alpha a -180 a 180 para mapeo más fácil
+                 alpha = (alpha + 540) % 360 - 180; // Wrap around
+            }
+
+            // Actualización Visual Bola (relativa al contenedor)
+            const ballX = ((gamma + 90) / 180) * 100;
+            const ballY = ((beta + 90) / 180) * 100;
+            targetX = Math.max(0, Math.min(100, ballX)); // Clamp 0-100
+            targetY = Math.max(0, Math.min(100, ballY));
+
+            // Control de Audio (solo si está sonando)
+            if (!appState.isPlaying || !audioContext || audioContext.state !== 'running') return;
+
+            // --- Volumen (Beta) ---
+            const volumeRange = 120; // -60 a +60 grados desde calibrado
+            const normalizedBeta = Math.max(-60, Math.min(60, beta));
+            let volumeLevel = (normalizedBeta + 60) / volumeRange;
+            volumeLevel = Math.pow(volumeLevel, appState.volumeSensitivity); // Aplicar sensibilidad
+            volumeDisplay.textContent = Math.round(volumeLevel * 100) + '%';
+            // Bola reactiva al volumen
+             const ballScale = 0.5 + volumeLevel * 1.5; // Escala de 0.5 a 2
+             targetScale = Math.max(0.5, Math.min(2.5, ballScale)); // Clamp escala
+
+            // Aplicar volumen global (afecta a todos los sonidos antes de analyser)
+            if (mainGainNode) mainGainNode.gain.setTargetAtTime(volumeLevel * 0.8, audioContext.currentTime, 0.05); // 0.8 max vol
+
+            // --- Filtro (Alpha) ---
+             if (appState.filterEnabled && filterNode && rawAlpha !== null) {
+                 // Mapear alpha (-180 a 180) a frecuencia de filtro (ej. 100Hz a 15000Hz exponencialmente)
+                 const filterRange = Math.log2(15000 / 100); // Rango en octavas
+                 const alphaFraction = (alpha + 180) / 360; // 0 a 1
+                 const filterFreq = 100 * Math.pow(2, alphaFraction * filterRange);
+                 filterNode.frequency.setTargetAtTime(filterFreq, audioContext.currentTime, 0.05);
+             } else if (filterNode) {
+                 // Asegurar que el filtro está abierto si no está habilitado
+                 filterNode.frequency.setTargetAtTime(20000, audioContext.currentTime, 0.05);
+             }
+
+            // --- Frecuencia/Nota (Gamma) ---
+            if (appState.soundMode === 'wave' && oscillator) {
+                const semitonesRangeWave = 36;
+                const waveFreq = 110 * Math.pow(2, ((gamma + appState.noteRangeDegrees / 2) / appState.noteRangeDegrees) * semitonesRangeWave / 12);
+                oscillator.frequency.setTargetAtTime(waveFreq, audioContext.currentTime, 0.05);
+                frequencyDisplay.textContent = waveFreq.toFixed(1) + ' Hz';
+            } else if (appState.soundMode === 'piano') {
+                if (validMidiNotesForScale.length === 0) return;
+
+                const tiltFraction = (Math.max(-appState.noteRangeDegrees / 2, Math.min(appState.noteRangeDegrees / 2, gamma)) + appState.noteRangeDegrees / 2) / appState.noteRangeDegrees;
+                const targetSemitoneOffset = (tiltFraction * PIANO_SEMITONE_RANGE) - (PIANO_SEMITONE_RANGE / 2);
+                const targetBaseMidiNote = PIANO_CENTER_MIDI_NOTE + targetSemitoneOffset;
+                // Añadir tónica seleccionada
+                const targetMidiNoteWithRoot = targetBaseMidiNote + appState.rootNote;
+
+                const closestValidMidiNote = validMidiNotesForScale.reduce((prev, curr) =>
+                    (Math.abs(curr - targetMidiNoteWithRoot) < Math.abs(prev - targetMidiNoteWithRoot) ? curr : prev)
+                );
+
+                if (closestValidMidiNote !== currentNoteMidi) {
+                     // Detener la nota ANTERIOR solo si NO está el sustain activo
+                    if (currentNoteMidi !== null && !appState.sustainEnabled && activePianoNotes[currentNoteMidi]) {
+                         activePianoNotes[currentNoteMidi].stop();
+                    }
+
+                    // Iniciar la nueva nota (si no está ya sonando por sustain)
+                    if (!activePianoNotes[closestValidMidiNote]) {
+                         createPianoSound(closestValidMidiNote, 1.0); // Volumen controlado por mainGain
+                    }
+
+                    currentNoteMidi = closestValidMidiNote; // Actualizar nota principal activa
+
+                    // Actualizar display
+                    const noteName = noteNames[closestValidMidiNote % 12];
+                    const octave = Math.floor(closestValidMidiNote / 12) - 1;
+                    frequencyDisplay.innerHTML = `${noteName}<span class="text-xs align-top">${octave}</span>`;
+                }
+            }
+        }
+
+        // --- FUNCIONES UI Y VISUALIZACIÓN ---
+
+        let targetX = 50, targetY = 50, currentX = 50, currentY = 50;
+        let targetScale = 1, currentScaleFactor = 1;
+        let analyserDataArray = null;
+
+        function animationLoop() {
+            // Movimiento suave bola
+            currentX += (targetX - currentX) * 0.2;
+            currentY += (targetY - currentY) * 0.2;
+            // Escala suave bola
+            currentScaleFactor += (targetScale - currentScaleFactor) * 0.2;
+            sensorBall.style.transform = `translate(calc(${currentX}% - 50%), calc(${currentY}% - 50%)) scale(${currentScaleFactor})`;
+
+            // Actualizar visualizador de volumen
+             if (appState.isPlaying && analyserNode) {
+                 if (!analyserDataArray) analyserDataArray = new Uint8Array(analyserNode.frequencyBinCount);
+                 analyserNode.getByteTimeDomainData(analyserDataArray); // Obtener datos de onda
+
+                 // Calcular RMS (Root Mean Square) como medida de volumen simple
+                 let sumSquares = 0.0;
+                 for (const amplitude of analyserDataArray) {
+                     const normalized = (amplitude / 128.0) - 1.0; // Normalizar -1 a 1
+                     sumSquares += normalized * normalized;
+                 }
+                 const rms = Math.sqrt(sumSquares / analyserDataArray.length);
+                 const volumePercent = Math.min(100, Math.max(0, rms * 250)); // Ajustar escala
+                 volumeVisualizerBar.style.width = `${volumePercent}%`;
+             } else {
+                  volumeVisualizerBar.style.width = '0%';
+             }
+
+
+            animationFrameId = requestAnimationFrame(animationLoop);
+        }
+        function startAnimationLoop() { if (!animationFrameId) animationLoop(); }
+        function stopAnimationLoop() {
+             if (animationFrameId) cancelAnimationFrame(animationFrameId);
+             animationFrameId = null;
+             sensorBall.style.transform = `translate(-50%, -50%) scale(1)`; // Reset
+             currentX = 50; currentY = 50; targetX = 50; targetY = 50;
+             currentScaleFactor = 1; targetScale = 1;
+             volumeVisualizerBar.style.width = '0%'; // Reset visualizer
+        }
+
+        function updateUI() {
+            startBtn.disabled = appState.isPlaying;
+            stopBtn.disabled = !appState.isPlaying;
+            calibrateBtn.disabled = !appState.isPlaying; // Calibrar solo mientras suena
+
+            // Modo Sonido
+            soundModeButtons.forEach(btn => btn.classList.toggle('selected-scale', btn.dataset.mode === appState.soundMode));
+            waveOptionsDiv.classList.toggle('hidden', appState.soundMode !== 'wave');
+            pianoOptionsDiv.classList.toggle('hidden', appState.soundMode !== 'piano');
+            sustainBtn.style.display = (appState.soundMode === 'piano') ? 'block' : 'none';
+
+            // Opciones Modo Onda
+            waveTypeButtons.forEach(btn => btn.classList.toggle('selected-wave', btn.dataset.wave === appState.waveType));
+
+            // Opciones Modo Piano
+            rootNoteButtons.forEach(btn => btn.classList.toggle('selected-root', parseInt(btn.dataset.root) === appState.rootNote));
+            scaleButtons.forEach(btn => btn.classList.toggle('selected-scale', btn.dataset.scale === appState.currentScale));
+
+            // Sliders
+            volumeSensitivitySlider.value = appState.volumeSensitivity;
+            volumeSensitivityValue.textContent = appState.volumeSensitivity.toFixed(1);
+            noteRangeSlider.value = appState.noteRangeDegrees;
+            noteRangeValue.textContent = appState.noteRangeDegrees;
+
+            // Toggle Efectos
+            filterToggleBtn.textContent = appState.filterEnabled ? 'ON' : 'OFF';
+            filterToggleBtn.classList.toggle('bg-green-500', appState.filterEnabled);
+             filterToggleBtn.classList.toggle('dark:bg-green-600', appState.filterEnabled);
+            filterToggleBtn.classList.toggle('text-white', appState.filterEnabled);
+            delayToggleBtn.textContent = appState.delayEnabled ? 'ON' : 'OFF';
+             delayToggleBtn.classList.toggle('bg-green-500', appState.delayEnabled);
+              delayToggleBtn.classList.toggle('dark:bg-green-600', appState.delayEnabled);
+             delayToggleBtn.classList.toggle('text-white', appState.delayEnabled);
+
+            // Botón Sustain
+            sustainBtn.classList.toggle('active', appState.sustainEnabled);
+        }
+
+        function toggleVisualizerMode() { /* ... (sin cambios) ... */ }
+
+        function setSoundMode(mode) {
+            if (appState.soundMode === mode) return;
+            const wasPlaying = appState.isPlaying;
+            if (wasPlaying) stopAudio(); // Detener antes de cambiar
+            appState.soundMode = mode;
+            saveSettings(); updateUI();
+            if (wasPlaying) startAudio();
+        }
+        function setWaveType(type) {
+            if (appState.waveType === type) return;
+            appState.waveType = type;
+            if (oscillator) oscillator.type = type; // Cambiar en vivo si está sonando
+            saveSettings(); updateUI();
+        }
+        function setRootNote(root) {
+            root = parseInt(root);
+            if (appState.rootNote === root) return;
+             const wasPlaying = appState.isPlaying;
+             if (wasPlaying) stopAudio();
+            appState.rootNote = root;
+            validMidiNotesForScale = calculateValidMidiNotes(appState.currentScale, appState.rootNote); // Recalcular con nueva tónica
+            saveSettings(); updateUI();
+             if (wasPlaying) startAudio();
+        }
+        function setScale(scale) {
+            if (appState.currentScale === scale) return;
+             const wasPlaying = appState.isPlaying;
+             if (wasPlaying) stopAudio();
+            appState.currentScale = scale;
+            validMidiNotesForScale = calculateValidMidiNotes(appState.currentScale, appState.rootNote); // Recalcular
+            saveSettings(); updateUI();
+             if (wasPlaying) startAudio();
+        }
+        function setVolumeSensitivity(value) {
+            appState.volumeSensitivity = parseFloat(value);
+            saveSettings(); updateUI();
+        }
+        function setNoteRange(value) {
+            appState.noteRangeDegrees = parseInt(value);
+            saveSettings(); updateUI();
+        }
+        function toggleFilter() {
+            appState.filterEnabled = !appState.filterEnabled;
+            if (!appState.filterEnabled && filterNode) { // Asegurar filtro abierto al desactivar
+                 filterNode.frequency.setTargetAtTime(20000, audioContext.currentTime, 0.05);
+            }
+            saveSettings(); updateUI();
+        }
+        function toggleDelay() {
+             appState.delayEnabled = !appState.delayEnabled;
+             // Conectar/Desconectar el nodo de feedback del delay
+             if (feedbackGainNode && delayNode) {
+                 if (appState.delayEnabled) {
+                     delayNode.connect(feedbackGainNode); // Reconectar si no estaba
+                 } else {
+                     try { feedbackGainNode.disconnect(delayNode); } catch(e){} // Desconectar feedback
+                 }
+             }
+             saveSettings(); updateUI();
+        }
+        function setSustain(enabled) {
+            if (appState.soundMode !== 'piano' || appState.sustainEnabled === enabled) return;
+            appState.sustainEnabled = enabled;
+             console.log("Sustain:", enabled);
+
+             // Si se desactiva el sustain, detener todas las notas que estaban retenidas
+             if (!enabled) {
+                 Object.values(activePianoNotes).forEach(note => note.stop()); // Llama a stop() que ahora respeta el flag
+             }
+
+            saveSettings(); updateUI();
+        }
+
+        // --- CÁLCULO DE NOTAS VÁLIDAS (Modificado para Tónica) ---
+        function calculateValidMidiNotes(scaleName, rootNote = 0, minMidi = 21, maxMidi = 108) {
+            const scaleIntervals = scales[scaleName];
+            if (!scaleIntervals) return [];
+            const notes = [];
+            for (let midi = minMidi; midi <= maxMidi; midi++) {
+                const intervalFromRoot = (midi - rootNote + 1200) % 12; // Intervalo desde la tónica (0-11)
+                if (scaleIntervals.includes(intervalFromRoot)) {
+                    notes.push(midi);
+                }
+            }
+            console.log(`Generated ${notes.length} valid MIDI notes for scale ${scaleName} (Root: ${rootNote})`);
+            return notes;
+        }
+
+        // --- PERSISTENCIA ---
+        function saveSettings() {
+            try {
+                const settingsToSave = { ...appState };
+                // No guardar estados transitorios
+                delete settingsToSave.isPlaying;
+                delete settingsToSave.isVisualizerMode;
+                delete settingsToSave.permissionGranted;
+                localStorage.setItem('pianoSensorSettings', JSON.stringify(settingsToSave));
+            } catch (e) { console.error("Error saving settings:", e); }
+        }
+
+        function loadSettings() {
+             try {
+                const saved = localStorage.getItem('pianoSensorSettings');
+                if (saved) {
+                    const loadedState = JSON.parse(saved);
+                    // Fusionar estado cargado con el estado por defecto
+                    appState = { ...appState, ...loadedState };
+                    console.log("Settings loaded:", appState);
+                }
+             } catch (e) { console.error("Error loading settings:", e); }
+        }
+
+        // --- INICIALIZACIÓN ---
+        function generateScaleButtons() {
+            scaleOptionsGrid.innerHTML = ''; // Limpiar
+            Object.keys(scales).forEach(scaleKey => {
+                const btn = document.createElement('button');
+                btn.dataset.scale = scaleKey;
+                // Capitalizar y reemplazar _ por espacio para el nombre
+                const displayName = scaleKey.charAt(0).toUpperCase() + scaleKey.slice(1).replace(/_/g, ' ');
+                btn.textContent = displayName;
+                btn.className = "scale-btn text-xs px-2 py-1 bg-gray-200 dark:bg-gray-700 rounded transition duration-200 ease-in-out";
+                btn.addEventListener('click', () => setScale(scaleKey));
+                scaleOptionsGrid.appendChild(btn);
+            });
+            // Global scope needed for updateUI
+            window.scaleButtons = document.querySelectorAll('.scale-btn');
+        }
+
+         function showStatusMessage(message, type = "info") { /* ... (sin cambios) ... */ }
+
+
+        document.addEventListener('DOMContentLoaded', () => {
+            loadSettings(); // Cargar ajustes guardados
+            generateScaleButtons(); // Crear botones de escala dinámicamente
+            validMidiNotesForScale = calculateValidMidiNotes(appState.currentScale, appState.rootNote); // Calcular notas iniciales
+            updateUI(); // Aplicar ajustes cargados a la UI
+            showStatusMessage("Listo. Presiona 'Iniciar'.", "info");
+
+            // Event Listeners para Controles
+            startBtn.addEventListener('click', startAudio);
+            stopBtn.addEventListener('click', stopAudio);
+            calibrateBtn.addEventListener('click', calibrateSensors);
+            visualizerModeBtn.addEventListener('click', toggleVisualizerMode);
+            helpBtn.addEventListener('click', () => helpModal.classList.add('active'));
+            closeHelpBtn.addEventListener('click', () => helpModal.classList.remove('active'));
+
+             // Sustain (Touch y Mouse para mantener presionado)
+             sustainBtn.addEventListener('touchstart', (e) => { e.preventDefault(); setSustain(true); }, { passive: false });
+             sustainBtn.addEventListener('touchend', (e) => { e.preventDefault(); setSustain(false); });
+             sustainBtn.addEventListener('mousedown', () => setSustain(true));
+             sustainBtn.addEventListener('mouseup', () => setSustain(false));
+             sustainBtn.addEventListener('mouseleave', () => { if (appState.sustainEnabled) setSustain(false); }); // Si sale el dedo/mouse
+
+
+            soundModeButtons.forEach(btn => btn.addEventListener('click', () => setSoundMode(btn.dataset.mode)));
+            waveTypeButtons.forEach(btn => btn.addEventListener('click', () => setWaveType(btn.dataset.wave)));
+            rootNoteButtons.forEach(btn => btn.addEventListener('click', () => setRootNote(btn.dataset.root)));
+            // Listeners de escala añadidos en generateScaleButtons
+
+            volumeSensitivitySlider.addEventListener('input', (e) => volumeSensitivityValue.textContent = parseFloat(e.target.value).toFixed(1));
+            volumeSensitivitySlider.addEventListener('change', (e) => setVolumeSensitivity(e.target.value)); // Guardar al soltar
+            noteRangeSlider.addEventListener('input', (e) => noteRangeValue.textContent = e.target.value);
+            noteRangeSlider.addEventListener('change', (e) => setNoteRange(e.target.value));
+
+            filterToggleBtn.addEventListener('click', toggleFilter);
+            delayToggleBtn.addEventListener('click', toggleDelay);
+
+
+            // Inicialización temprana de AudioContext (Click/Touch)
+            const initAudioOnInteraction = () => { initAudioContext(); document.body.removeEventListener('touchstart', initAudioOnInteraction); document.body.removeEventListener('click', initAudioOnInteraction); };
+            document.body.addEventListener('touchstart', initAudioOnInteraction, { once: true, passive: true });
+            document.body.addEventListener('click', initAudioOnInteraction, { once: true });
+
+            // Manejo Visibilidad Pestaña
+            document.addEventListener('visibilitychange', () => {
+                if (!audioContext) return;
+                if (document.hidden) {
+                     // Suspender es menos disruptivo que detener
+                    if (appState.isPlaying) audioContext.suspend().then(() => console.log("AudioContext suspendido."));
+                } else {
+                    if (audioContext.state === 'suspended') {
+                        // Reanudar si estaba sonando antes de ocultar (o dejar que start lo haga)
+                         // audioContext.resume().then(() => console.log("AudioContext reanudado."));
+                         console.log("Pestaña visible, AudioContext listo para reanudar.");
+                    }
+                }
+            });
+
+             // Chequeo inicial de sensores
+             window.addEventListener('deviceorientation', function checkSensor(e) {
+                 if (e.beta !== null || e.gamma !== null) {
+                     if (!appState.permissionGranted && !(typeof DeviceOrientationEvent.requestPermission === 'function')) {
+                         appState.permissionGranted = true; setupOrientationListener();
+                     }
+                 }
+                 window.removeEventListener('deviceorientation', checkSensor);
+             }, { once: true });
+        });
+    </script>
+</body>
+</html>
